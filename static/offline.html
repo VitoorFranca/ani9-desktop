@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'"
+    />
+    <title>ANI-9 — sem conexão</title>
+    <style>
+      :root {
+        --paper: #f6f2e7;
+        --ink: #191916;
+        --ink-soft: #5f5e57;
+        --accent: #ab4d27;
+        --on-accent: #fbf9f2;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --paper: #1a1915;
+          --ink: #ece8dc;
+          --ink-soft: #b0ada1;
+          --accent: #e0855a;
+          --on-accent: #1a1915;
+        }
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: var(--paper);
+        color: var(--ink);
+        font:
+          15px/1.5 -apple-system,
+          BlinkMacSystemFont,
+          "Geist",
+          system-ui,
+          sans-serif;
+      }
+      main {
+        height: 100%;
+        display: grid;
+        place-content: center;
+        text-align: center;
+        padding: 24px;
+        -webkit-app-region: drag;
+      }
+      h1 {
+        font:
+          400 34px/1.2 "Instrument Serif",
+          Georgia,
+          serif;
+        margin: 0 0 8px;
+      }
+      p {
+        margin: 0 auto 24px;
+        max-width: 26em;
+        color: var(--ink-soft);
+      }
+      button {
+        -webkit-app-region: no-drag;
+        font: inherit;
+        border: none;
+        border-radius: 8px;
+        padding: 8px 18px;
+        background: var(--accent);
+        color: var(--on-accent);
+        cursor: pointer;
+      }
+      small {
+        display: block;
+        margin-top: 16px;
+        color: var(--ink-soft);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Sem conexão</h1>
+      <p>O ANI-9 guarda os seus dados na nuvem e precisa de internet para abrir. Confira a conexão e tente de novo.</p>
+      <div><button id="tentar" type="button">Tentar de novo</button></div>
+      <small id="estado">O app tenta de novo sozinho quando a conexão voltar.</small>
+    </main>
+    <script>
+      // The address that failed comes in ?url=; the app only lets the window open the ANI-9 itself.
+      const target = new URLSearchParams(location.search).get("url") || "";
+      const retry = () => {
+        if (target) location.href = target;
+      };
+      document.getElementById("tentar").addEventListener("click", retry);
+      window.addEventListener("online", retry);
+      setInterval(() => {
+        if (navigator.onLine) retry();
+      }, 30000);
+    </script>
+  </body>
+</html>

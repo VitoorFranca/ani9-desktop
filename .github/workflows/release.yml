@@ -1,0 +1,118 @@
+name: Release
+
+# Builds ANI-9.app for macOS (Apple Silicon) and publishes it.
+#
+#   tag vX.Y.Z      tests, packages and creates the GitHub release vX.Y.Z with
+#                   ANI-9-X.Y.Z-macos-arm64.dmg and its SHA-256
+#   Run workflow    the same build, kept only as an artifact of the run
+#
+# The tag must match "version" in package.json.
+#
+# Signing: without secrets the app is signed ad-hoc (macOS asks to confirm the
+# first time it opens). With these repository secrets it is signed with a
+# Developer ID and notarized:
+#   MACOS_CERTIFICATE_P12 (base64), MACOS_CERTIFICATE_PASSWORD, SIGN_IDENTITY,
+#   APPLE_ID, APPLE_APP_PASSWORD, APPLE_TEAM_ID
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  macos:
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      HAS_CERT: ${{ secrets.MACOS_CERTIFICATE_P12 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Versão
+        id: version
+        run: |
+          version=$(node -p 'require("./package.json").version')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::A tag $GITHUB_REF_NAME não bate com a versão $version do package.json."
+            exit 1
+          fi
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Testes
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm format:check
+          pnpm check
+          pnpm test
+
+      - name: Certificado Developer ID
+        if: env.HAS_CERT == 'true'
+        env:
+          P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          P12_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/release.keychain-db"
+          password=$(openssl rand -hex 16)
+          echo "$P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/cert.p12" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple: -k "$password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/cert.p12"
+
+      - name: Empacotar ANI-9.app
+        env:
+          SIGN_IDENTITY: ${{ env.HAS_CERT == 'true' && secrets.SIGN_IDENTITY || '' }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          pnpm package
+          dmg="ANI-9-${{ steps.version.outputs.version }}-macos-arm64.dmg"
+          mv "release/$dmg" "$dmg"
+          shasum -a 256 "$dmg" > "$dmg.sha256"
+          cat "$dmg.sha256"
+          echo "DMG=$dmg" >> "$GITHUB_ENV"
+
+      - name: Guardar como artefato
+        uses: actions/upload-artifact@v4
+        with:
+          name: ANI-9-${{ steps.version.outputs.version }}-macos-arm64
+          path: |
+            ${{ env.DMG }}
+            ${{ env.DMG }}.sha256
+          retention-days: 14
+
+      - name: Publicar a release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SIGNED: ${{ env.HAS_CERT }}
+        run: |
+          install="Baixe o \`.dmg\`, abra e arraste **ANI-9** para Aplicativos. Requer macOS 26 em Mac com Apple Silicon."
+          if [ "$SIGNED" != "true" ]; then
+            install=$(printf '%s\n\n%s' "$install" \
+              "Esta versão não tem assinatura da Apple. Na primeira vez, abra o ANI-9, feche o aviso e clique em **Abrir Mesmo Assim** em Ajustes do Sistema → Privacidade e Segurança (ou rode \`xattr -dr com.apple.quarantine /Applications/ANI-9.app\`).")
+          fi
+          notes=$(printf '%s\n\n%s\n\n%s' "## Instalar" "$install" "Confira o arquivo com \`shasum -a 256 -c $DMG.sha256\`.")
+          gh release create "$GITHUB_REF_NAME" "$DMG" "$DMG.sha256" \
+            --title "ANI-9 $GITHUB_REF_NAME" --notes "$notes" --generate-notes --verify-tag
+
+      - name: Limpar o keychain
+        if: always() && env.HAS_CERT == 'true'
+        run: security delete-keychain "$RUNNER_TEMP/release.keychain-db" || true

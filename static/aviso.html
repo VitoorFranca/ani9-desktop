@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'"
+    />
+    <title>Avisos do ANI-9</title>
+    <style>
+      :root {
+        --paper-raised: #fbf9f2;
+        --ink: #191916;
+        --ink-soft: #5f5e57;
+        --line: rgba(25, 25, 22, 0.12);
+        --accent: #ab4d27;
+        --on-accent: #fbf9f2;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --paper-raised: #23221d;
+          --ink: #ece8dc;
+          --ink-soft: #b0ada1;
+          --line: rgba(236, 232, 220, 0.14);
+          --accent: #e0855a;
+          --on-accent: #1a1915;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        background: transparent;
+        font:
+          13px/1.4 -apple-system,
+          BlinkMacSystemFont,
+          "Geist",
+          system-ui,
+          sans-serif;
+        color: var(--ink);
+        -webkit-user-select: none;
+        user-select: none;
+        overflow: hidden;
+      }
+      main {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 6px 10px 14px;
+      }
+      article {
+        background: var(--paper-raised);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+        padding: 12px 12px 10px 14px;
+      }
+      header {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+      }
+      .app {
+        font-size: 11px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--ink-soft);
+      }
+      h1 {
+        flex: 1;
+        margin: 2px 0 0;
+        font-size: 14px;
+        font-weight: 600;
+        overflow-wrap: anywhere;
+      }
+      p {
+        margin: 4px 0 0;
+        color: var(--ink-soft);
+        overflow-wrap: anywhere;
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 6px;
+        margin-top: 10px;
+      }
+      button {
+        font: inherit;
+        border-radius: 7px;
+        border: 1px solid var(--line);
+        background: transparent;
+        color: var(--ink);
+        padding: 4px 12px;
+        cursor: pointer;
+      }
+      button.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: var(--on-accent);
+      }
+      button.close {
+        border: none;
+        padding: 0 4px;
+        font-size: 16px;
+        line-height: 1;
+        color: var(--ink-soft);
+      }
+      button:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 1px;
+      }
+    </style>
+  </head>
+  <body>
+    <main id="lista" aria-live="polite"></main>
+    <script>
+      const lista = document.getElementById("lista");
+
+      function button(label, className, onClick) {
+        const el = document.createElement("button");
+        el.type = "button";
+        el.textContent = label;
+        if (className) el.className = className;
+        el.addEventListener("click", onClick);
+        return el;
+      }
+
+      window.aviso.onList((notices) => {
+        lista.replaceChildren(
+          ...notices.map((notice) => {
+            const card = document.createElement("article");
+            const header = document.createElement("header");
+            const text = document.createElement("div");
+            text.style.flex = "1";
+            const app = document.createElement("div");
+            app.className = "app";
+            app.textContent = "ANI-9";
+            const title = document.createElement("h1");
+            title.textContent = notice.title;
+            text.append(app, title);
+            const close = button("×", "close", () => window.aviso.act(notice.tag, "close"));
+            close.setAttribute("aria-label", "Fechar aviso");
+            header.append(text, close);
+            card.append(header);
+            if (notice.body) {
+              const body = document.createElement("p");
+              body.textContent = notice.body;
+              card.append(body);
+            }
+            const actions = document.createElement("div");
+            actions.className = "actions";
+            actions.append(button("Abrir", notice.done ? "" : "primary", () => window.aviso.act(notice.tag, "open")));
+            if (notice.done) actions.append(button("Feita", "primary", () => window.aviso.act(notice.tag, "done")));
+            card.append(actions);
+            return card;
+          }),
+        );
+        requestAnimationFrame(() => window.aviso.height(lista.getBoundingClientRect().height));
+      });
+    </script>
+  </body>
+</html>
