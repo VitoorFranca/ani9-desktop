@@ -16,11 +16,20 @@ import {
   session,
   shell,
   type IpcMainEvent,
+  type IpcMainInvokeEvent,
   type WebContents,
 } from "electron";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { CHANNELS, badgeSchema, badgeText, noticeSchema } from "../shared/bridge.js";
+import {
+  CHANNELS,
+  assistantStartSchema,
+  assistantTextSchema,
+  badgeSchema,
+  badgeText,
+  noticeSchema,
+} from "../shared/bridge.js";
+import { createAssistantHost, type AssistantHost } from "./assistant.js";
 import { buildMenu } from "./menu.js";
 import { appPathUrl, externalAction, isAppUrl, resolveAppUrl } from "./navigation.js";
 import { createNotifier, type AppNotice } from "./notices.js";
@@ -107,7 +116,7 @@ function go(path: string) {
 }
 
 /** Messages count only from the ANI-9 page in the main window (its top frame). */
-function fromApp(event: IpcMainEvent): boolean {
+function fromApp(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
   const frame = event.senderFrame;
   return !!win && event.sender === win.webContents && !!frame && frame.parent === null && frame.origin === appOrigin;
 }
@@ -168,6 +177,8 @@ function createWindow() {
   const contents = current.webContents;
   contents.on("did-navigate", () => {
     listening = new Set();
+    // A full page load forgets the conversation; the engine goes with it.
+    assistant?.stop();
   });
   contents.on("will-navigate", (event) => {
     if (isAppUrl(event.url, appOrigin)) return;
@@ -231,6 +242,7 @@ function refreshMenu() {
 }
 
 let notifier: ReturnType<typeof createNotifier>;
+let assistant: AssistantHost;
 
 async function lookForUpdate(asked: boolean) {
   try {
@@ -320,6 +332,23 @@ function listen() {
     if (!fromApp(event)) return;
     if (channel === CHANNELS.navigate || channel === CHANNELS.taskDone) listening.add(channel);
   });
+
+  // The Assistente: the page asks, the app runs the Claude Code installed here (see assistant.ts).
+  ipcMain.handle(CHANNELS.assistantStatus, (event) =>
+    fromApp(event) ? assistant.status() : { state: "error", detail: "origem" },
+  );
+  ipcMain.handle(CHANNELS.assistantStart, (event, payload: unknown) => {
+    if (!fromApp(event)) return { ok: false, error: "origem" };
+    const config = assistantStartSchema.safeParse(payload);
+    return config.success ? assistant.start(config.data) : { ok: false, error: "pedido inválido" };
+  });
+  ipcMain.on(CHANNELS.assistantSend, (event, payload: unknown) => {
+    if (!fromApp(event)) return;
+    const text = assistantTextSchema.safeParse(payload);
+    if (text.success) assistant.send(text.data);
+  });
+  ipcMain.on(CHANNELS.assistantInterrupt, (event) => fromApp(event) && assistant.interrupt());
+  ipcMain.on(CHANNELS.assistantStop, (event) => fromApp(event) && assistant.stop());
 }
 
 function start() {
@@ -339,6 +368,16 @@ function start() {
     onOpen: openNotice,
     onDone: finishTask,
   });
+  assistant = createAssistantHost({
+    appOrigin,
+    dataDir: join(app.getPath("userData"), "assistente"),
+    emit: (event) => {
+      const contents = win?.webContents;
+      // Only the ANI-9 page hears the conversation.
+      if (contents && !contents.isDestroyed() && isAppUrl(contents.getURL(), appOrigin))
+        contents.send(CHANNELS.assistantEvent, event);
+    },
+  });
   guardSession();
   listen();
   refreshMenu();
@@ -350,6 +389,7 @@ function start() {
 
 app.on("before-quit", () => {
   quitting = true;
+  assistant?.dispose();
 });
 app.on("activate", () => showWindow());
 // The app stays open without windows (reminders); only ⌘Q quits.

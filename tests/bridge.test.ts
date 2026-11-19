@@ -40,6 +40,12 @@ describe("contract", () => {
       navigate: "ani9:navigate",
       taskDone: "ani9:task-done",
       listening: "ani9:listening",
+      assistantStatus: "ani9:assistant-status",
+      assistantStart: "ani9:assistant-start",
+      assistantSend: "ani9:assistant-send",
+      assistantInterrupt: "ani9:assistant-interrupt",
+      assistantStop: "ani9:assistant-stop",
+      assistantEvent: "ani9:assistant-event",
     });
   });
 });

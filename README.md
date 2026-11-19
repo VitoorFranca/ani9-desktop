@@ -15,6 +15,9 @@ navegador não faz:
 - **Links para fora** (fontes dos roadmaps, links nos cartões) abrem no
   navegador padrão.
 - **Aviso de versão nova** uma vez por dia (o app não se atualiza sozinho).
+- **Assistente** (nas contas em que ele está ligado): o tutor do ANI-9 usa o
+  [Claude Code](https://claude.com/claude-code) instalado no seu Mac, com o
+  seu login. Sem o Claude Code, o resto do app funciona igual.
 
 Os seus dados continuam onde sempre estiveram, na nuvem do ANI-9: o mesmo
 login, os mesmos baralhos no site e no celular. O app precisa de internet.
@@ -72,7 +75,7 @@ pnpm package         # release/ANI-9-<versão>-macos-arm64.dmg (assinatura ad-ho
 ### Como funciona
 
 ```
-src/main/        processo principal: janela, menus, avisos, Dock, versões
+src/main/        processo principal: janela, menus, avisos, Dock, versões, motor do Assistente
 src/preload/     index.ts expõe window.ani9Desktop à página; aviso.ts, ao painel
 src/shared/      o contrato da ponte (canais, tipos e validação com zod)
 static/          painel de avisos e tela "sem conexão"
@@ -90,6 +93,11 @@ A janela abre o site do ANI-9. A página fala com o app só pela ponte
 | `onNavigate(fn)`                               | o menu ou um aviso pede para abrir uma tela (`/rotina`) |
 | `onTaskDone(fn)`                               | "Feita" num aviso                                       |
 
+| `assistant.status()` | o Claude Code deste Mac: pronto, ausente ou sem login |
+| `assistant.start({ systemPrompt, token, model })` | abre uma conversa (uma por vez) |
+| `assistant.send(texto)`, `interrupt()`, `stop()` | fala, para a resposta, encerra |
+| `assistant.onEvent(fn)` | texto aos poucos, ferramenta em uso, fim do turno, uso |
+
 O contrato muda só com versão nova de `bridge`, e o site confere cada função
 antes de usar. Assim, um site novo continua funcionando com um app antigo.
 
@@ -103,6 +111,13 @@ antes de usar. Assim, um site novo continua funcionando com um app antigo.
   navegador; o resto é bloqueado. Nada pode embutir `<webview>`.
 - A página não recebe permissões além de copiar para a área de transferência
   e tela cheia.
+- O Assistente roda o `claude` que você instalou, sem modificação, com um
+  perfil fixo: nenhuma ferramenta do Claude Code (sem terminal, arquivos ou
+  web), só as ferramentas do ANI-9 no endereço do próprio site, sem as suas
+  configurações, skills, memória ou conectores, e sem guardar a conversa em
+  disco. A página só escolhe o texto do tutor, o token da conversa e o
+  modelo. O app nunca vê a credencial do Claude, e encerra a conversa se o
+  motor abrir com qualquer ferramenta que não seja do ANI-9.
 - Fuses do Electron: o binário não roda como Node, ignora `NODE_OPTIONS` e
   `--inspect` e só carrega o app de dentro do `app.asar`.
 

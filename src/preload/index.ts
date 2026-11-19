@@ -3,7 +3,16 @@
 // each one came from and what it carries before acting.
 
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
-import { BRIDGE_VERSION, CHANNELS, type Ani9Desktop, type Notice } from "../shared/bridge-constants.js";
+import {
+  BRIDGE_VERSION,
+  CHANNELS,
+  type Ani9Assistant,
+  type Ani9Desktop,
+  type AssistantEvent,
+  type AssistantStart,
+  type AssistantStatus,
+  type Notice,
+} from "../shared/bridge-constants.js";
 
 const version = process.argv.find((arg) => arg.startsWith("--ani9-version="))?.split("=")[1] ?? "0.0.0";
 
@@ -19,6 +28,24 @@ function subscribe(channel: string, listener: (value: string) => void): () => vo
   };
 }
 
+const assistant: Ani9Assistant = {
+  status: () => ipcRenderer.invoke(CHANNELS.assistantStatus) as Promise<AssistantStatus>,
+  start: (config: AssistantStart) =>
+    ipcRenderer.invoke(CHANNELS.assistantStart, config) as Promise<{ ok: boolean; error?: string }>,
+  send: (text: string) => ipcRenderer.send(CHANNELS.assistantSend, text),
+  interrupt: () => ipcRenderer.send(CHANNELS.assistantInterrupt),
+  stop: () => ipcRenderer.send(CHANNELS.assistantStop),
+  onEvent: (listener) => {
+    const handler = (_event: IpcRendererEvent, value: unknown) => {
+      if (value && typeof value === "object") listener(value as AssistantEvent);
+    };
+    ipcRenderer.on(CHANNELS.assistantEvent, handler);
+    return () => {
+      ipcRenderer.removeListener(CHANNELS.assistantEvent, handler);
+    };
+  },
+};
+
 const bridge: Ani9Desktop = {
   bridge: BRIDGE_VERSION,
   version,
@@ -26,6 +53,7 @@ const bridge: Ani9Desktop = {
   setBadge: (count: number) => ipcRenderer.send(CHANNELS.setBadge, count),
   onNavigate: (listener) => subscribe(CHANNELS.navigate, listener),
   onTaskDone: (listener) => subscribe(CHANNELS.taskDone, listener),
+  assistant: Object.freeze(assistant),
 };
 
 contextBridge.exposeInMainWorld("ani9Desktop", Object.freeze(bridge));

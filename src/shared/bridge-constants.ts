@@ -11,7 +11,61 @@ export const CHANNELS = {
   taskDone: "ani9:task-done",
   /** The page handles navigate/taskDone itself (sent once per subscription). */
   listening: "ani9:listening",
+  assistantStatus: "ani9:assistant-status",
+  assistantStart: "ani9:assistant-start",
+  assistantSend: "ani9:assistant-send",
+  assistantInterrupt: "ani9:assistant-interrupt",
+  assistantStop: "ani9:assistant-stop",
+  assistantEvent: "ani9:assistant-event",
 } as const;
+
+/** Models the page may ask for, as Claude Code names them ("default" = the plan's own default). */
+export const ASSISTANT_MODELS = ["default", "opus", "sonnet", "haiku", "fable"] as const;
+
+/** Whether the Assistente's engine (the Claude Code installed on this Mac) can run. */
+export interface AssistantStatus {
+  state: "ready" | "missing" | "logged-out" | "expired" | "error";
+  /** Claude Code's version, when found. */
+  version?: string;
+  /** The person's plan ("max", "pro"…), when Claude Code says it. */
+  plan?: string;
+  loginExpiresAt?: string;
+  detail?: string;
+}
+
+/** What the page sends to open a conversation; the app decides everything else about the engine. */
+export interface AssistantStart {
+  /** The tutor's text, from the ANI-9 server. */
+  systemPrompt: string;
+  /** Opens the ANI-9 tools for this conversation only. */
+  token: string;
+  model: (typeof ASSISTANT_MODELS)[number];
+}
+
+export type AssistantEvent =
+  /** The engine is up: the tools it has, and whether it runs on the person's plan (not an API key). */
+  | { type: "ready"; tools: string[]; subscription: boolean; model: string }
+  | { type: "delta"; text: string }
+  /** A whole message of the assistant (the deltas, joined). */
+  | { type: "message"; text: string }
+  | { type: "tool"; name: string }
+  /** The turn ended. */
+  | { type: "done"; ok: boolean; error?: string }
+  /** How much of the plan's limits is used (0 to 1), when Claude Code tells. */
+  | { type: "usage"; status: string; fiveHour?: number; sevenDay?: number; resetsAt?: number }
+  /** The engine stopped (asked to, or by itself). */
+  | { type: "closed"; reason: "stopped" | "exited" | "unsafe" | "failed"; detail?: string };
+
+export interface Ani9Assistant {
+  status(): Promise<AssistantStatus>;
+  /** Starts the engine for one conversation, replacing any other. */
+  start(config: AssistantStart): Promise<{ ok: boolean; error?: string }>;
+  send(text: string): void;
+  /** Stops the answer being written. The engine may close; start again to go on. */
+  interrupt(): void;
+  stop(): void;
+  onEvent(listener: (event: AssistantEvent) => void): () => void;
+}
 
 export interface Notice {
   /** Showing a notice with the same tag replaces the previous one. */
@@ -36,6 +90,8 @@ export interface Ani9Desktop {
   onNavigate(listener: (url: string) => void): () => void;
   /** "Feita" in a notice: the page finishes this task. */
   onTaskDone(listener: (taskId: string) => void): () => void;
+  /** The Assistente's engine. Absent in app versions before 0.2.0. */
+  assistant?: Ani9Assistant;
 }
 
 /** Text for the Dock: empty clears it, very large counts are shortened. */
