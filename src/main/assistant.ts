@@ -18,12 +18,15 @@ import {
   type AssistantEvent,
   type AssistantStart,
   type AssistantStatus,
+  type GenerationRequest,
 } from "../shared/bridge-constants.js";
 import {
   claudeCandidates,
   engineArgs,
   engineEnv,
   foreignTools,
+  generationArgs,
+  generationResult,
   readAuthStatus,
   readEngineLine,
   reportedTools,
@@ -196,9 +199,44 @@ export function createAssistantHost(options: {
     return { ok: true };
   }
 
+  /** Pieces made at once, at most: each is a whole Claude Code running on this Mac. */
+  let generating = 0;
+  const MAX_GENERATING = 2;
+  const GENERATION_MS = 5 * 60 * 1000;
+
+  function generate(request: GenerationRequest): Promise<{ ok: boolean; text?: string; error?: string }> {
+    const path = findClaude();
+    if (!path) return Promise.resolve({ ok: false, error: "Claude Code não encontrado neste Mac." });
+    if (generating >= MAX_GENERATING)
+      return Promise.resolve({ ok: false, error: "Já há duas sendo feitas; tente em seguida." });
+    const cwd = join(options.dataDir, "vazio");
+    mkdirSync(cwd, { recursive: true });
+    generating += 1;
+    return new Promise((resolve) => {
+      const child = spawn(path, generationArgs(request), { cwd, env: engineEnv(process.env) });
+      let stdout = "";
+      child.stdout.setEncoding("utf8");
+      child.stdout.on("data", (chunk: string) => {
+        stdout += chunk;
+        if (stdout.length > 2_000_000) child.kill();
+      });
+      child.stderr.resume();
+      const timer = setTimeout(() => child.kill(), GENERATION_MS);
+      const finish = (answer: { ok: boolean; text?: string; error?: string }) => {
+        clearTimeout(timer);
+        generating -= 1;
+        resolve(answer);
+      };
+      child.on("error", () => finish({ ok: false, error: "Não deu para iniciar o Claude Code." }));
+      child.on("close", () => finish(generationResult(stdout)));
+      child.stdin.end(request.prompt);
+    });
+  }
+
   return {
     status,
     start,
+    generate,
     send(text: string, channel = DEFAULT_CHANNEL, attachments: AssistantAttachment[] = []) {
       const session = sessions.get(channel);
       if (!session?.child.stdin.writable) return;

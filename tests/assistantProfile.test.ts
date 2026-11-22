@@ -8,6 +8,8 @@ import {
   reportedTools,
   toolsConfig,
   userLine,
+  generationArgs,
+  generationResult,
 } from "../src/main/assistantProfile.js";
 import { assistantChannelSchema, assistantStartSchema, assistantTextSchema } from "../src/shared/bridge.js";
 
@@ -169,6 +171,21 @@ describe("engine output", () => {
     expect(line.endsWith("\n")).toBe(true);
     expect(line.trim().includes("\n")).toBe(false);
     expect(JSON.parse(line)).toEqual({ type: "user", message: { role: "user", content: 'diga "oi"\nagora' } });
+  });
+
+  it("makes a piece apart with no tool at all, and reads its answer", () => {
+    const args = generationArgs({ system: "Instruções", prompt: "Pêndulo", model: "sonnet" });
+    expect(args).toEqual(
+      expect.arrayContaining(["--model", "sonnet", "--tools", "", "--strict-mcp-config", "--effort", "low"]),
+    );
+    expect(args).not.toContain("--mcp-config");
+    expect(args).not.toContain("--allowedTools");
+    expect(generationResult('{"type":"result","is_error":false,"result":"```html\\n<p>oi</p>\\n```"}')).toEqual({
+      ok: true,
+      text: "```html\n<p>oi</p>\n```",
+    });
+    expect(generationResult('{"is_error":true,"result":"erro"}').ok).toBe(false);
+    expect(generationResult("lixo").ok).toBe(false);
   });
 
   it("sends files the engine reads itself, named, before what the person wrote", () => {

@@ -8,6 +8,7 @@ import {
   CHANNELS,
   type Ani9Assistant,
   type AssistantAttachment,
+  type GenerationRequest,
   type Ani9Desktop,
   type AssistantEvent,
   type AssistantStart,
@@ -57,6 +58,8 @@ const assistant: Ani9Assistant = {
   start: (config: AssistantStart) =>
     ipcRenderer.invoke(CHANNELS.assistantStart, config) as Promise<{ ok: boolean; error?: string }>,
   attachments: true,
+  generate: (request: GenerationRequest) =>
+    ipcRenderer.invoke(CHANNELS.assistantGenerate, request) as Promise<{ ok: boolean; text?: string; error?: string }>,
   send: (text: string, channel?: string, attachments?: AssistantAttachment[]) =>
     ipcRenderer.send(CHANNELS.assistantSend, text, channel, attachments ?? []),
   interrupt: (channel?: string) => ipcRenderer.send(CHANNELS.assistantInterrupt, channel),

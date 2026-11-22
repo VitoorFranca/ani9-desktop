@@ -17,6 +17,7 @@ export const CHANNELS = {
   assistantInterrupt: "ani9:assistant-interrupt",
   assistantStop: "ani9:assistant-stop",
   assistantEvent: "ani9:assistant-event",
+  assistantGenerate: "ani9:assistant-generate",
   voiceStatus: "ani9:voice-status",
   voiceInstall: "ani9:voice-install",
   voiceListen: "ani9:voice-listen",
@@ -82,6 +83,18 @@ type AssistantEventBody =
 /** `channel`: the conversation the event belongs to (absent before 0.3.0). */
 export type AssistantEvent = AssistantEventBody & { channel?: string };
 
+/** Models the page may use to make a piece of the conversation (a simulation) on its own. */
+export const GENERATION_MODELS = ["haiku", "sonnet", "opus", "fable"] as const;
+
+/** A piece of work done apart from the conversation, by a model the person chose (from 0.4.0). */
+export interface GenerationRequest {
+  /** Instructions for the model. */
+  system: string;
+  /** What to make. */
+  prompt: string;
+  model: (typeof GENERATION_MODELS)[number];
+}
+
 /** Kinds of file the engine reads itself (PDF and images); text files go in the message as text. */
 export const ATTACHMENT_TYPES = ["application/pdf", "image/png", "image/jpeg", "image/gif", "image/webp"] as const;
 
@@ -98,6 +111,11 @@ export interface Ani9Assistant {
   channels?: true;
   /** Present from 0.4.0: `send` takes files (PDF, images). */
   attachments?: true;
+  /**
+   * From 0.4.0: makes something apart from the conversation (a simulation's code) with the model
+   * the person chose for it. No tools, no access to the account: text in, text out.
+   */
+  generate?(request: GenerationRequest): Promise<{ ok: boolean; text?: string; error?: string }>;
   status(): Promise<AssistantStatus>;
   /** Starts the engine for one conversation. It replaces only the engine of the same channel. */
   start(config: AssistantStart): Promise<{ ok: boolean; error?: string }>;

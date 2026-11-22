@@ -9,6 +9,7 @@ import {
   type AssistantAttachment,
   type AssistantEvent,
   type AssistantStart,
+  type GenerationRequest,
 } from "../shared/bridge-constants.js";
 
 /** The name the ANI-9 tools get inside Claude Code: `mcp__ani9__<tool>`. */
@@ -66,6 +67,47 @@ export function engineArgs(config: AssistantStart, toolsFile: string): string[] 
     "--verbose",
     "--include-partial-messages",
   ];
+}
+
+/**
+ * Arguments of `claude` to make one piece apart from the conversation: the
+ * chosen model, the given instructions, no tool at all (not even the ANI-9's),
+ * nothing of the person's settings, nothing kept.
+ */
+export function generationArgs(request: GenerationRequest): string[] {
+  return [
+    "-p",
+    "--model",
+    request.model,
+    "--system-prompt",
+    request.system,
+    "--tools",
+    "",
+    "--setting-sources",
+    "",
+    "--strict-mcp-config",
+    "--permission-mode",
+    "dontAsk",
+    "--no-session-persistence",
+    "--output-format",
+    "json",
+    // Writing a simulation needs no long deliberation: thinking off, low effort (about 3× faster, same code).
+    "--effort",
+    "low",
+    "--settings",
+    JSON.stringify({ alwaysThinkingEnabled: false }),
+  ];
+}
+
+/** The text of a generation, from Claude Code's JSON answer; an error when it failed. */
+export function generationResult(stdout: string): { ok: boolean; text?: string; error?: string } {
+  try {
+    const answer = JSON.parse(stdout.trim().split("\n").at(-1) ?? "") as { result?: unknown; is_error?: unknown };
+    if (answer.is_error || typeof answer.result !== "string") return { ok: false, error: "O modelo não terminou." };
+    return { ok: true, text: answer.result };
+  } catch {
+    return { ok: false, error: "Resposta ilegível do Claude Code." };
+  }
 }
 
 /** The engine's environment: no API key (so the person's plan is used) and nothing else of the app's own. */

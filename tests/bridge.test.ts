@@ -46,6 +46,7 @@ describe("contract", () => {
       assistantInterrupt: "ani9:assistant-interrupt",
       assistantStop: "ani9:assistant-stop",
       assistantEvent: "ani9:assistant-event",
+      assistantGenerate: "ani9:assistant-generate",
       voiceStatus: "ani9:voice-status",
       voiceInstall: "ani9:voice-install",
       voiceListen: "ani9:voice-listen",
@@ -83,5 +84,15 @@ describe("attachments", () => {
     );
     expect(assistantAttachmentsSchema.safeParse([{ ...pdf, data: "não é base64" }]).success).toBe(false);
     expect(assistantAttachmentsSchema.safeParse(Array(6).fill(pdf)).success).toBe(false);
+  });
+});
+
+describe("generation", () => {
+  it("takes instructions, a request and one of the fast models, nothing else", async () => {
+    const { generationSchema } = await import("../src/shared/bridge.js");
+    const ok = { system: "Faça uma simulação.", prompt: "Pêndulo simples", model: "haiku" };
+    expect(generationSchema.safeParse(ok).success).toBe(true);
+    expect(generationSchema.safeParse({ ...ok, model: "gpt" }).success).toBe(false);
+    expect(generationSchema.safeParse({ ...ok, tools: ["Bash"] }).success).toBe(false);
   });
 });

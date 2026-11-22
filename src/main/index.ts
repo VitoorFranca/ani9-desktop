@@ -31,6 +31,7 @@ import {
   assistantTextSchema,
   badgeSchema,
   badgeText,
+  generationSchema,
   noticeSchema,
   voiceAudioSchema,
   voiceSaySchema,
@@ -362,6 +363,11 @@ function listen() {
   ipcMain.handle(CHANNELS.assistantStatus, (event) =>
     fromApp(event) ? assistant.status() : { state: "error", detail: "origem" },
   );
+  ipcMain.handle(CHANNELS.assistantGenerate, (event, payload: unknown) => {
+    if (!fromApp(event)) return { ok: false, error: "origem" };
+    const request = generationSchema.safeParse(payload);
+    return request.success ? assistant.generate(request.data) : { ok: false, error: "pedido inválido" };
+  });
   ipcMain.handle(CHANNELS.assistantStart, (event, payload: unknown) => {
     if (!fromApp(event)) return { ok: false, error: "origem" };
     const config = assistantStartSchema.safeParse(payload);

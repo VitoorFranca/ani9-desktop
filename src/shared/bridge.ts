@@ -2,7 +2,14 @@
 // itself (channels, types) is in bridge-constants.ts.
 
 import { z } from "zod";
-import { ASSISTANT_MODELS, ATTACHMENT_TYPES, type AssistantStart, type Notice } from "./bridge-constants.js";
+import {
+  ASSISTANT_MODELS,
+  ATTACHMENT_TYPES,
+  GENERATION_MODELS,
+  type AssistantStart,
+  type GenerationRequest,
+  type Notice,
+} from "./bridge-constants.js";
 
 export * from "./bridge-constants.js";
 
@@ -59,9 +66,17 @@ export const voiceSaySchema = z.tuple([
   z.string().min(1).max(4000),
 ]);
 
+export const generationSchema = z.strictObject({
+  system: z.string().min(1).max(40_000),
+  prompt: z.string().min(1).max(40_000),
+  model: z.enum(GENERATION_MODELS),
+});
+
 // The schema and the interface the page sees must stay the same shape.
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 const sameShape: Same<z.infer<typeof noticeSchema>, Notice> = true;
 void sameShape;
 const sameStart: Same<z.infer<typeof assistantStartSchema>, AssistantStart> = true;
 void sameStart;
+const sameGeneration: Same<z.infer<typeof generationSchema>, GenerationRequest> = true;
+void sameGeneration;
