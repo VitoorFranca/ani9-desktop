@@ -44,6 +44,7 @@ export interface VoiceHost {
   cancel(): void;
   say(id: number, text: string): void;
   hush(): void;
+  wake(on: boolean): void;
   dispose(): void;
 }
 
@@ -106,6 +107,8 @@ export function createVoiceHost(options: {
           return options.emit({ type: "heard", text: String(event.text ?? "") });
         case "said":
           return options.emit({ type: "said", id: Number(event.id) });
+        case "wake":
+          return options.emit({ type: "wake", text: String(event.text ?? "") });
         case "error":
           return options.emit({ type: "error", message: String(event.message ?? "Erro na voz.") });
         case "audio": {
@@ -195,6 +198,9 @@ export function createVoiceHost(options: {
       if (status().state === "ready") write({ cmd: "say", id, text });
     },
     hush: () => child && write({ cmd: "hush" }),
+    wake(on) {
+      if (on ? status().state === "ready" : Boolean(child)) write({ cmd: "wake", on });
+    },
     dispose: close,
   };
 }

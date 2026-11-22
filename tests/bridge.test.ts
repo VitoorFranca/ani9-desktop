@@ -54,6 +54,7 @@ describe("contract", () => {
       voiceCancel: "ani9:voice-cancel",
       voiceSay: "ani9:voice-say",
       voiceHush: "ani9:voice-hush",
+      voiceWake: "ani9:voice-wake",
       voiceEvent: "ani9:voice-event",
     });
   });
@@ -69,5 +70,18 @@ describe("voice", () => {
     expect(voiceSaySchema.safeParse([1, "Pronto."]).success).toBe(true);
     expect(voiceSaySchema.safeParse([0, "Pronto."]).success).toBe(false);
     expect(voiceSaySchema.safeParse([2, ""]).success).toBe(false);
+  });
+});
+
+describe("attachments", () => {
+  it("takes PDFs and images in base64, a few at a time", async () => {
+    const { assistantAttachmentsSchema } = await import("../src/shared/bridge.js");
+    const pdf = { name: "a.pdf", mediaType: "application/pdf", data: "JVBERi0=" };
+    expect(assistantAttachmentsSchema.safeParse([pdf]).success).toBe(true);
+    expect(assistantAttachmentsSchema.safeParse([{ ...pdf, mediaType: "application/x-msdownload" }]).success).toBe(
+      false,
+    );
+    expect(assistantAttachmentsSchema.safeParse([{ ...pdf, data: "não é base64" }]).success).toBe(false);
+    expect(assistantAttachmentsSchema.safeParse(Array(6).fill(pdf)).success).toBe(false);
   });
 });

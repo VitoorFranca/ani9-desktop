@@ -7,6 +7,7 @@ import {
   BRIDGE_VERSION,
   CHANNELS,
   type Ani9Assistant,
+  type AssistantAttachment,
   type Ani9Desktop,
   type AssistantEvent,
   type AssistantStart,
@@ -40,6 +41,7 @@ const voice: Ani9Voice = {
   cancel: () => ipcRenderer.send(CHANNELS.voiceCancel),
   say: (id: number, text: string) => ipcRenderer.send(CHANNELS.voiceSay, id, text),
   hush: () => ipcRenderer.send(CHANNELS.voiceHush),
+  wake: (on: boolean) => ipcRenderer.send(CHANNELS.voiceWake, on === true),
   onEvent(listener: (event: VoiceEvent) => void) {
     const handler = (_event: IpcRendererEvent, value: VoiceEvent) => listener(value);
     ipcRenderer.on(CHANNELS.voiceEvent, handler);
@@ -54,7 +56,9 @@ const assistant: Ani9Assistant = {
   status: () => ipcRenderer.invoke(CHANNELS.assistantStatus) as Promise<AssistantStatus>,
   start: (config: AssistantStart) =>
     ipcRenderer.invoke(CHANNELS.assistantStart, config) as Promise<{ ok: boolean; error?: string }>,
-  send: (text: string, channel?: string) => ipcRenderer.send(CHANNELS.assistantSend, text, channel),
+  attachments: true,
+  send: (text: string, channel?: string, attachments?: AssistantAttachment[]) =>
+    ipcRenderer.send(CHANNELS.assistantSend, text, channel, attachments ?? []),
   interrupt: (channel?: string) => ipcRenderer.send(CHANNELS.assistantInterrupt, channel),
   stop: (channel?: string) => ipcRenderer.send(CHANNELS.assistantStop, channel),
   onEvent: (listener) => {

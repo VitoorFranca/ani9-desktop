@@ -4,7 +4,12 @@
 // decided by the app; the page chooses only the tutor's text, the
 // conversation token and the model. Kept free of Electron to be tested alone.
 
-import { ASSISTANT_MODELS, type AssistantEvent, type AssistantStart } from "../shared/bridge-constants.js";
+import {
+  ASSISTANT_MODELS,
+  type AssistantAttachment,
+  type AssistantEvent,
+  type AssistantStart,
+} from "../shared/bridge-constants.js";
 
 /** The name the ANI-9 tools get inside Claude Code: `mcp__ani9__<tool>`. */
 export const TOOL_SERVER = "ani9";
@@ -77,8 +82,24 @@ export function engineEnv(source: NodeJS.ProcessEnv): Record<string, string> {
 }
 
 /** A line the page sends becomes one user message on the engine's input. */
-export function userLine(text: string): string {
-  return `${JSON.stringify({ type: "user", message: { role: "user", content: text } })}\n`;
+export function userLine(text: string, attachments: AssistantAttachment[] = []): string {
+  if (attachments.length === 0)
+    return `${JSON.stringify({ type: "user", message: { role: "user", content: text } })}\n`;
+  // The files come first, each named, then what the person wrote about them.
+  const content = [
+    ...attachments.flatMap((file) => [
+      { type: "text", text: `Arquivo enviado pela pessoa: ${file.name}` },
+      file.mediaType === "application/pdf"
+        ? {
+            type: "document",
+            source: { type: "base64", media_type: file.mediaType, data: file.data },
+            title: file.name,
+          }
+        : { type: "image", source: { type: "base64", media_type: file.mediaType, data: file.data } },
+    ]),
+    { type: "text", text },
+  ];
+  return `${JSON.stringify({ type: "user", message: { role: "user", content } })}\n`;
 }
 
 /** Tools the engine reports that are not the ANI-9's: with any of these, the conversation must not go on. */

@@ -2,7 +2,7 @@
 // itself (channels, types) is in bridge-constants.ts.
 
 import { z } from "zod";
-import { ASSISTANT_MODELS, type AssistantStart, type Notice } from "./bridge-constants.js";
+import { ASSISTANT_MODELS, ATTACHMENT_TYPES, type AssistantStart, type Notice } from "./bridge-constants.js";
 
 export * from "./bridge-constants.js";
 
@@ -33,7 +33,22 @@ export const assistantStartSchema = z.strictObject({
   channel: assistantChannelSchema.optional(),
 });
 
-export const assistantTextSchema = z.string().min(1).max(20_000);
+export const assistantTextSchema = z.string().min(1).max(200_000);
+
+/** Up to 5 files, about 24 MB each (the engine's own limit for a PDF is 32 MB). */
+export const assistantAttachmentsSchema = z
+  .array(
+    z.strictObject({
+      name: z.string().min(1).max(200),
+      mediaType: z.enum(ATTACHMENT_TYPES),
+      data: z
+        .string()
+        .min(4)
+        .max(32_000_000)
+        .regex(/^[A-Za-z0-9+/]+=*$/, "base64"),
+    }),
+  )
+  .max(5);
 
 /** A piece of what the microphone heard: up to 2 s at 16 kHz. */
 export const voiceAudioSchema = z

@@ -25,6 +25,7 @@ export const CHANNELS = {
   voiceCancel: "ani9:voice-cancel",
   voiceSay: "ani9:voice-say",
   voiceHush: "ani9:voice-hush",
+  voiceWake: "ani9:voice-wake",
   voiceEvent: "ani9:voice-event",
 } as const;
 
@@ -81,13 +82,26 @@ type AssistantEventBody =
 /** `channel`: the conversation the event belongs to (absent before 0.3.0). */
 export type AssistantEvent = AssistantEventBody & { channel?: string };
 
+/** Kinds of file the engine reads itself (PDF and images); text files go in the message as text. */
+export const ATTACHMENT_TYPES = ["application/pdf", "image/png", "image/jpeg", "image/gif", "image/webp"] as const;
+
+/** A file sent with a message: the engine reads it (from 0.4.0). */
+export interface AssistantAttachment {
+  name: string;
+  mediaType: (typeof ATTACHMENT_TYPES)[number];
+  /** The file, in base64. */
+  data: string;
+}
+
 export interface Ani9Assistant {
   /** Present from 0.3.0: several conversations run at once, each on its channel. */
   channels?: true;
+  /** Present from 0.4.0: `send` takes files (PDF, images). */
+  attachments?: true;
   status(): Promise<AssistantStatus>;
   /** Starts the engine for one conversation. It replaces only the engine of the same channel. */
   start(config: AssistantStart): Promise<{ ok: boolean; error?: string }>;
-  send(text: string, channel?: string): void;
+  send(text: string, channel?: string, attachments?: AssistantAttachment[]): void;
   /** Stops the answer being written. The engine may close; start again to go on. */
   interrupt(channel?: string): void;
   /** Stops one conversation's engine, or all of them when no channel is given. */
@@ -120,6 +134,8 @@ export type VoiceEvent =
   | { type: "audio"; id: number; rate: number; samples: Float32Array }
   /** Everything of `say(id)` was sent. */
   | { type: "said"; id: number }
+  /** "Ei, Ani" was heard, with what was said after the name. */
+  | { type: "wake"; text: string }
   | { type: "error"; message: string };
 
 /**
@@ -138,6 +154,8 @@ export interface Ani9Voice {
   cancel(): void;
   say(id: number, text: string): void;
   hush(): void;
+  /** Listens for "Ei, Ani" in the audio sent between utterances. */
+  wake(on: boolean): void;
   onEvent(listener: (event: VoiceEvent) => void): () => void;
 }
 

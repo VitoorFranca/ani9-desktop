@@ -25,6 +25,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
   CHANNELS,
+  assistantAttachmentsSchema,
   assistantChannelSchema,
   assistantStartSchema,
   assistantTextSchema,
@@ -372,11 +373,12 @@ function listen() {
     const parsed = assistantChannelSchema.safeParse(value);
     return parsed.success ? { ok: true, channel: parsed.data } : { ok: false };
   };
-  ipcMain.on(CHANNELS.assistantSend, (event, payload: unknown, channel: unknown) => {
+  ipcMain.on(CHANNELS.assistantSend, (event, payload: unknown, channel: unknown, files: unknown) => {
     if (!fromApp(event)) return;
     const text = assistantTextSchema.safeParse(payload);
     const to = channelOf(channel);
-    if (text.success && to.ok) assistant.send(text.data, to.channel);
+    const attachments = assistantAttachmentsSchema.safeParse(files ?? []);
+    if (text.success && to.ok && attachments.success) assistant.send(text.data, to.channel, attachments.data);
   });
   ipcMain.on(CHANNELS.assistantInterrupt, (event, channel: unknown) => {
     const to = channelOf(channel);
@@ -412,6 +414,7 @@ function listen() {
     if (fromApp(event) && said.success) voice.say(said.data[0], said.data[1]);
   });
   ipcMain.on(CHANNELS.voiceHush, (event) => fromApp(event) && voice.hush());
+  ipcMain.on(CHANNELS.voiceWake, (event, on: unknown) => fromApp(event) && voice.wake(on === true));
 }
 
 function start() {
@@ -457,6 +460,8 @@ function start() {
     // The models are the same for every profile of the app (installed, development): kept once.
     modelsDir: join(app.getPath("appData"), APP_NAME, "modelos-de-voz"),
     emit: (event) => {
+      // "Ei, Ani" from another app: the ANI-9 comes to the front to answer.
+      if (event.type === "wake") showWindow();
       const contents = win?.webContents;
       if (contents && !contents.isDestroyed() && isAppUrl(contents.getURL(), appOrigin))
         contents.send(CHANNELS.voiceEvent, event);

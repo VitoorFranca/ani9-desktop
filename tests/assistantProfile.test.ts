@@ -171,6 +171,21 @@ describe("engine output", () => {
     expect(JSON.parse(line)).toEqual({ type: "user", message: { role: "user", content: 'diga "oi"\nagora' } });
   });
 
+  it("sends files the engine reads itself, named, before what the person wrote", () => {
+    const line = userLine("resume", [
+      { name: "aula.pdf", mediaType: "application/pdf", data: "JVBERi0=" },
+      { name: "quadro.png", mediaType: "image/png", data: "iVBORw==" },
+    ]);
+    expect(line.trim().includes("\n")).toBe(false);
+    const content = JSON.parse(line).message.content;
+    expect(content.map((part: { type: string }) => part.type)).toEqual(["text", "document", "text", "image", "text"]);
+    expect(content[1]).toMatchObject({
+      source: { media_type: "application/pdf", data: "JVBERi0=" },
+      title: "aula.pdf",
+    });
+    expect(content.at(-1)).toEqual({ type: "text", text: "resume" });
+  });
+
   it("reads who is signed in to Claude Code", () => {
     const now = new Date("2026-11-18T00:00:00Z");
     const signed = { loggedIn: true, subscriptionType: "max", loginExpiresAt: "2026-12-03T20:24:24.269Z" };
@@ -194,7 +209,7 @@ describe("what the page may send", () => {
     expect(assistantStartSchema.safeParse({ ...start, executable: "/bin/sh" }).success).toBe(false);
     expect(assistantStartSchema.safeParse({ ...start, mcpUrl: "https://evil.com" }).success).toBe(false);
     expect(assistantTextSchema.safeParse("").success).toBe(false);
-    expect(assistantTextSchema.safeParse("x".repeat(20_001)).success).toBe(false);
+    expect(assistantTextSchema.safeParse("x".repeat(200_001)).success).toBe(false);
   });
 
   it("takes a channel only as a plain name of one of the page's conversations", () => {

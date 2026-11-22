@@ -14,6 +14,7 @@ import { join } from "node:path";
 import {
   DEFAULT_CHANNEL,
   MAX_CHANNELS,
+  type AssistantAttachment,
   type AssistantEvent,
   type AssistantStart,
   type AssistantStatus,
@@ -198,12 +199,12 @@ export function createAssistantHost(options: {
   return {
     status,
     start,
-    send(text: string, channel = DEFAULT_CHANNEL) {
+    send(text: string, channel = DEFAULT_CHANNEL, attachments: AssistantAttachment[] = []) {
       const session = sessions.get(channel);
       if (!session?.child.stdin.writable) return;
       session.lastActive = now();
       setAnswering(session, true);
-      session.child.stdin.write(userLine(text));
+      session.child.stdin.write(userLine(text, attachments));
     },
     /** Ends the answer being written; Claude Code may close, and the page starts it again. */
     interrupt(channel = DEFAULT_CHANNEL) {

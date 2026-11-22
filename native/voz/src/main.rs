@@ -14,10 +14,18 @@
 //!   {"cmd":"cancel"}                      drop the utterance
 //!   {"cmd":"say","id":1,"text":"…"}       speak, sentence by sentence
 //!   {"cmd":"hush"}                        stop speaking
+//!   {"cmd":"wake","on":true}              listen for "Ei, Ani" in the audio sent between utterances
 //! Out (stdout):
 //!   {"event":"ready"}  {"event":"speech"}  {"event":"heard","text":"…"}
 //!   {"event":"nothing"}  {"event":"audio","id":1,"rate":22050,"pcm":"<base64>"}
-//!   {"event":"said","id":1}  {"event":"error","message":"…"}
+//!   {"event":"said","id":1}  {"event":"wake","text":"what came after the name"}
+//!   {"event":"error","message":"…"}
+//!
+//! The speech model is big (about a gigabyte in memory): it is loaded on the
+//! first utterance and let go after a few idle minutes. Listening for the
+//! name keeps it loaded: each time someone speaks (the voice detector says
+//! so; silence costs nothing), the first seconds are transcribed and checked
+//! for "Ei, Ani" at the start.
 
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::Deserialize;
@@ -33,12 +41,15 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{Duration, Instant};
 
 const RATE: i32 = 16_000;
 /// Few threads: the voice runs beside everything else on a laptop, often on battery.
 const THREADS: i32 = 2;
 /// The longest utterance kept, in seconds.
 const MAX_SECONDS: usize = 30;
+/** The speech model is let go after this long without an utterance. */
+const EAR_IDLE: Duration = Duration::from_secs(5 * 60);
 
 #[derive(Deserialize)]
 #[serde(tag = "cmd", rename_all = "lowercase")]
@@ -49,6 +60,7 @@ enum Command {
     Cancel,
     Say { id: u64, text: String },
     Hush,
+    Wake { on: bool },
 }
 
 /// One line out; stdout is shared by both threads.
@@ -106,8 +118,11 @@ fn sentences(text: &str) -> Vec<String> {
 struct Ear {
     vad: VoiceActivityDetector,
     recognizer: OfflineRecognizer,
-    /// Everything heard since "listen", kept for the recognizer.
-    heard: Vec<f32>,
+    /// The sound since the detector was last reset, kept raw for the recognizer: the
+    /// detector's own segments clip the first syllable, so the words are cut from here.
+    raw: Vec<f32>,
+    /// Samples dropped from the front of `raw` (long waits for the name keep only the last seconds).
+    dropped: usize,
     listening: bool,
     spoke: bool,
 }
@@ -148,50 +163,63 @@ impl Ear {
         };
         config.decoding_method = Some("greedy_search".into());
         let recognizer = OfflineRecognizer::create(&config).ok_or("Não deu para carregar o modelo que entende a fala.")?;
-        Ok(Ear { vad, recognizer, heard: Vec::new(), listening: false, spoke: false })
+        Ok(Ear { vad, recognizer, raw: Vec::new(), dropped: 0, listening: false, spoke: false })
+    }
+
+    fn reset(&mut self) {
+        self.vad.reset();
+        self.raw.clear();
+        self.dropped = 0;
     }
 
     fn start(&mut self) {
-        self.vad.reset();
-        self.heard.clear();
+        self.reset();
         self.listening = true;
         self.spoke = false;
     }
 
-    /// Feeds samples; true when the person has said something and gone quiet.
-    fn feed(&mut self, samples: &[f32], out: &Mutex<io::Stdout>) -> bool {
-        if !self.listening {
-            return false;
-        }
-        if self.heard.len() < MAX_SECONDS * RATE as usize {
-            self.heard.extend_from_slice(samples);
+    fn push(&mut self, samples: &[f32]) {
+        self.raw.extend_from_slice(samples);
+        // Waiting for the name can last hours: only the last seconds are kept.
+        let keep = (MAX_SECONDS + 5) * RATE as usize;
+        if !self.listening && self.raw.len() > keep + RATE as usize * 5 {
+            let extra = self.raw.len() - keep;
+            self.raw.drain(..extra);
+            self.dropped += extra;
         }
         self.vad.accept_waveform(samples);
-        if self.vad.detected() && !self.spoke {
-            self.spoke = true;
-            emit(out, json!({"event": "speech"}));
-        }
-        // A whole segment came out of the detector: speech followed by enough silence.
-        let finished = !self.vad.is_empty();
-        finished || self.heard.len() >= MAX_SECONDS * RATE as usize
     }
 
-    fn transcribe(&mut self) -> Option<String> {
-        self.listening = false;
-        self.vad.flush();
-        let mut speech: Vec<f32> = Vec::new();
+    /// The speech the detector found, from a little before it started to a little after it ended.
+    fn speech(&mut self, limit: usize) -> Option<Vec<f32>> {
+        let mut span: Option<(usize, usize)> = None;
         while let Some(segment) = self.vad.front() {
-            speech.extend_from_slice(segment.samples());
+            let start = segment.start().max(0) as usize;
+            let end = start + segment.n().max(0) as usize;
+            span = Some(match span {
+                Some((a, b)) => (a.min(start), b.max(end)),
+                None => (start, end),
+            });
             self.vad.pop();
         }
-        // Nothing the detector called speech: nothing to transcribe (no guessing from noise).
-        if speech.len() < (RATE as usize) / 4 {
+        let (start, end) = span?;
+        if end - start < RATE as usize / 4 {
             return None;
         }
-        let stream = self.recognizer.create_stream();
+        let pad_before = RATE as usize * 2 / 5;
+        let pad_after = RATE as usize * 3 / 10;
+        let from = start.saturating_sub(pad_before).max(self.dropped) - self.dropped;
+        let to = (end + pad_after).min(self.dropped + self.raw.len()) - self.dropped;
+        let to = to.min(from + limit);
+        let mut speech = self.raw[from..to].to_vec();
         // A little silence after the last word helps the end of the sentence come out.
         speech.extend(std::iter::repeat(0.0).take(RATE as usize / 2));
-        stream.accept_waveform(RATE, &speech);
+        Some(speech)
+    }
+
+    fn recognize(&self, speech: &[f32]) -> Option<String> {
+        let stream = self.recognizer.create_stream();
+        stream.accept_waveform(RATE, speech);
         self.recognizer.decode(&stream);
         let text = stream.get_result()?.text.trim().to_string();
         if text.is_empty() {
@@ -199,6 +227,119 @@ impl Ear {
         } else {
             Some(text)
         }
+    }
+
+    /// Feeds samples; true when the person has said something and gone quiet.
+    fn feed(&mut self, samples: &[f32], out: &Mutex<io::Stdout>) -> bool {
+        if !self.listening {
+            return false;
+        }
+        if self.raw.len() < MAX_SECONDS * RATE as usize {
+            self.push(samples);
+        }
+        if self.vad.detected() && !self.spoke {
+            self.spoke = true;
+            emit(out, json!({"event": "speech"}));
+        }
+        // A whole segment came out of the detector: speech followed by enough silence.
+        !self.vad.is_empty() || self.raw.len() >= MAX_SECONDS * RATE as usize
+    }
+
+    fn transcribe(&mut self) -> Option<String> {
+        self.listening = false;
+        self.vad.flush();
+        // Nothing the detector called speech: nothing to transcribe (no guessing from noise).
+        let speech = self.speech(MAX_SECONDS * RATE as usize)?;
+        self.recognize(&speech)
+    }
+}
+
+/** Seconds of each utterance checked for the name, which comes first. */
+const WAKE_SECONDS: usize = 6;
+
+/** Lower case, no accents, no punctuation: how the name is compared. */
+fn plain(text: &str) -> String {
+    let mut out = String::new();
+    for ch in text.to_lowercase().chars() {
+        let base = match ch {
+            'á' | 'à' | 'â' | 'ã' | 'ä' => 'a',
+            'é' | 'ê' | 'è' | 'ë' => 'e',
+            'í' | 'î' | 'ì' | 'ï' => 'i',
+            'ó' | 'ô' | 'õ' | 'ò' | 'ö' => 'o',
+            'ú' | 'û' | 'ù' | 'ü' => 'u',
+            'ç' => 'c',
+            c if c.is_alphanumeric() => c,
+            _ => ' ',
+        };
+        out.push(base);
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/** Letters to change to turn one word into the other. */
+fn distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for i in 1..=a.len() {
+        let mut previous = row[0];
+        row[0] = i;
+        for j in 1..=b.len() {
+            let here = row[j];
+            row[j] = (row[j] + 1).min(row[j - 1] + 1).min(previous + usize::from(a[i - 1] != b[j - 1]));
+            previous = here;
+        }
+    }
+    row[b.len()]
+}
+
+/** "Ani" as speech recognition writes it: Ani, Annie, Any, Eni, Ane… (a vowel, then close to "ani"). */
+fn is_name(word: &str) -> bool {
+    let word = word.trim_end_matches('9');
+    word.len() >= 3
+        && word.len() <= 5
+        && !["aia", "uma", "ana", "ene", "ani9"].contains(&word)
+        && word.starts_with(['a', 'e', 'i', 'o', 'h'])
+        && (distance(word, "ani") <= 1 || distance(word, "annie") <= 1 || ["aninha", "honey", "hani"].contains(&word))
+}
+
+/** What was said after the name, when the utterance starts with "Ei, Ani" (or the ways it is heard). */
+fn after_name(text: &str) -> Option<String> {
+    let words: Vec<String> = plain(text).split(' ').filter(|w| !w.is_empty()).map(str::to_string).collect();
+    let greeting = ["ei", "hey", "hei", "oi", "e", "ai", "ah", "ok", "okay", "hi", "ey", "hay"];
+    let first = words.first()?;
+    // "eiani", "heyannie": the greeting and the name run together.
+    for joined in ["ei", "hey", "hei", "oi", "e"] {
+        if let Some(rest) = first.strip_prefix(joined) {
+            if is_name(rest) {
+                return Some(words[1..].join(" "));
+            }
+        }
+    }
+    if greeting.contains(&first.as_str()) {
+        let second = words.get(1)?;
+        // After a greeting the recognizer also writes the name as "Danny" or "Dani" ("ei, ani" runs together),
+        // and "assistente" is accepted as the name too.
+        let heard_as = ["danny", "dani", "dany", "deni", "assistente"];
+        return (is_name(second) || heard_as.contains(&second.as_str())).then(|| words[2..].join(" "));
+    }
+    // The name alone, as the whole utterance.
+    (words.len() == 1 && is_name(first)).then(String::new)
+}
+
+impl Ear {
+    /** Between utterances: the sound goes to the detector; a finished utterance is checked for the name. */
+    fn wake_feed(&mut self, samples: &[f32]) -> Option<String> {
+        self.push(samples);
+        if self.vad.is_empty() {
+            return None;
+        }
+        let speech = self.speech(WAKE_SECONDS * RATE as usize)?;
+        let text = self.recognize(&speech)?;
+        if std::env::var_os("ANI9_VOZ_DEBUG").is_some() {
+            eprintln!("acordar? {text:?}");
+        }
+        after_name(&text)
     }
 }
 
@@ -275,13 +416,10 @@ fn main() {
         });
     }
 
-    let mut ear = match Ear::load(&models) {
-        Ok(ear) => ear,
-        Err(message) => {
-            emit(&out, json!({"event": "error", "message": message}));
-            std::process::exit(1);
-        }
-    };
+    // The speech model, loaded when the person first speaks and let go when idle.
+    let mut ear: Option<Ear> = None;
+    let mut ear_used = Instant::now();
+    let mut waking = false;
     emit(&out, json!({"event": "ready"}));
 
     let mut last_say = 0u64;
@@ -295,29 +433,111 @@ fn main() {
             }
         };
         match command {
-            Command::Listen => ear.start(),
+            Command::Listen => {
+                if ear.is_none() {
+                    match Ear::load(&models) {
+                        Ok(loaded) => ear = Some(loaded),
+                        Err(message) => {
+                            emit(&out, json!({"event": "error", "message": message}));
+                            continue;
+                        }
+                    }
+                }
+                ear_used = Instant::now();
+                ear.as_mut().unwrap().start();
+            }
             Command::Audio { pcm } => {
-                if ear.feed(&decode_pcm(&pcm), &out) {
-                    match ear.transcribe() {
-                        Some(text) => emit(&out, json!({"event": "heard", "text": text})),
-                        None => emit(&out, json!({"event": "nothing"})),
+                let samples = decode_pcm(&pcm);
+                match ear.as_mut() {
+                    Some(listening) if listening.listening => {
+                        ear_used = Instant::now();
+                        if listening.feed(&samples, &out) {
+                            match listening.transcribe() {
+                                Some(text) => emit(&out, json!({"event": "heard", "text": text})),
+                                None => emit(&out, json!({"event": "nothing"})),
+                            }
+                        }
+                    }
+                    _ => {
+                        // Between utterances: only the name is listened for, never while the voice speaks.
+                        if waking && !speaking.load(Ordering::SeqCst) {
+                            if let Some(waker) = ear.as_mut() {
+                                if let Some(rest) = waker.wake_feed(&samples) {
+                                    waker.reset();
+                                    emit(&out, json!({"event": "wake", "text": rest}));
+                                }
+                            }
+                        } else if ear.is_some() && !waking && ear_used.elapsed() > EAR_IDLE {
+                            ear = None;
+                        }
                     }
                 }
             }
             Command::Stop => {
-                if ear.listening {
-                    match ear.transcribe() {
+                if let Some(listening) = ear.as_mut().filter(|e| e.listening) {
+                    match listening.transcribe() {
                         Some(text) => emit(&out, json!({"event": "heard", "text": text})),
                         None => emit(&out, json!({"event": "nothing"})),
                     }
                 }
             }
-            Command::Cancel => ear.listening = false,
+            Command::Cancel => {
+                if let Some(listening) = ear.as_mut() {
+                    listening.listening = false;
+                }
+            }
+            Command::Wake { on } => {
+                waking = on;
+                if on && ear.is_none() {
+                    match Ear::load(&models) {
+                        Ok(loaded) => ear = Some(loaded),
+                        Err(message) => {
+                            waking = false;
+                            emit(&out, json!({"event": "error", "message": message}));
+                        }
+                    }
+                }
+                if let Some(waker) = ear.as_mut().filter(|e| !e.listening) {
+                    waker.reset();
+                }
+            }
             Command::Say { id, text } => {
                 last_say = last_say.max(id);
                 let _ = say_tx.send((id, text));
             }
             Command::Hush => hushed.store(last_say, Ordering::SeqCst),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::after_name;
+
+    #[test]
+    fn hears_the_name_at_the_start_and_keeps_what_follows() {
+        assert_eq!(after_name("Ei, Ani."), Some(String::new()));
+        assert_eq!(after_name("Ei Ani, abre o chat."), Some("abre o chat".into()));
+        assert_eq!(after_name("Hey Annie, cria um baralho"), Some("cria um baralho".into()));
+        assert_eq!(after_name("Ani!"), Some(String::new()));
+        assert_eq!(after_name("Oi, Aní, tudo bem?"), Some("tudo bem".into()));
+        assert_eq!(after_name("Eni, abre o chat."), None);
+        assert_eq!(after_name("Ei, Eni, abre o chat."), Some("abre o chat".into()));
+        assert_eq!(after_name("Eiani mostra minha semana"), Some("mostra minha semana".into()));
+        assert_eq!(after_name("Okay, Danny."), Some(String::new()));
+        assert_eq!(after_name("E, Danny, mostra a minha semana."), Some("mostra a minha semana".into()));
+        assert_eq!(after_name("Ei, assistente, abre o chat"), Some("abre o chat".into()));
+    }
+
+    #[test]
+    fn ignores_the_name_elsewhere_and_other_talk() {
+        assert_eq!(after_name("Ani, você viu isso?"), None);
+        assert_eq!(after_name("Eu falei com a Ani ontem"), None);
+        assert_eq!(after_name("Analisa a minha semana"), None);
+        assert_eq!(after_name("Ei, tudo bem?"), None);
+        assert_eq!(after_name("E aí, beleza?"), None);
+        assert_eq!(after_name("Hey Tony"), None);
+        assert_eq!(after_name("Danny, vem cá"), None);
+        assert_eq!(after_name(""), None);
     }
 }
