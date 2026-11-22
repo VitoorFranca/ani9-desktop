@@ -54,7 +54,7 @@ const [appDir] = await packager({
   prune: true,
   // Everything the app runs is bundled by esbuild into dist/.
   ignore: [
-    /^\/(src|build|release|tests|static|node_modules|\.github)(\/|$)/,
+    /^\/(src|build|release|tests|static|node_modules|native|\.github)(\/|$)/,
     /\.(ts|map|md)$/,
     /^\/(tsconfig\.json|build\.mjs|package\.mjs|pnpm-lock\.yaml)$/,
   ],
@@ -67,7 +67,10 @@ const [appDir] = await packager({
         osxNotarize: notarize,
       }
     : {}),
+  // The voice engine (native/voz), built by `pnpm voz:build`, goes beside the app's resources.
+  extraResource: ["native/voz/target/release/ani9-voz"],
   extendInfo: {
+    NSMicrophoneUsageDescription: "Para você falar com o Assistente do ANI. O áudio fica neste Mac.",
     LSMinimumSystemVersion: "26.0",
     NSHumanReadableCopyright: "Código aberto (MIT)",
   },

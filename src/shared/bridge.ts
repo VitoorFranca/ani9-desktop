@@ -35,6 +35,15 @@ export const assistantStartSchema = z.strictObject({
 
 export const assistantTextSchema = z.string().min(1).max(20_000);
 
+/** A piece of what the microphone heard: up to 2 s at 16 kHz. */
+export const voiceAudioSchema = z
+  .instanceof(Float32Array)
+  .refine((samples) => samples.length > 0 && samples.length <= 32_000, "áudio");
+export const voiceSaySchema = z.tuple([
+  z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+  z.string().min(1).max(4000),
+]);
+
 // The schema and the interface the page sees must stay the same shape.
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 const sameShape: Same<z.infer<typeof noticeSchema>, Notice> = true;

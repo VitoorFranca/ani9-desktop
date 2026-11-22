@@ -16,6 +16,7 @@ import {
   screen,
   session,
   shell,
+  systemPreferences,
   type IpcMainEvent,
   type IpcMainInvokeEvent,
   type WebContents,
@@ -30,8 +31,11 @@ import {
   badgeSchema,
   badgeText,
   noticeSchema,
+  voiceAudioSchema,
+  voiceSaySchema,
 } from "../shared/bridge.js";
 import { createAssistantHost, type AssistantHost } from "./assistant.js";
+import { createVoiceHost, type VoiceHost } from "./voice.js";
 import { buildMenu } from "./menu.js";
 import { appPathUrl, externalAction, isAppUrl, profileFolder, resolveAppUrl } from "./navigation.js";
 import { createNotifier, type AppNotice } from "./notices.js";
@@ -247,6 +251,7 @@ function refreshMenu() {
 
 let notifier: ReturnType<typeof createNotifier>;
 let assistant: AssistantHost;
+let voice: VoiceHost;
 
 async function lookForUpdate(asked: boolean) {
   try {
@@ -310,11 +315,20 @@ function finishTask(taskId: string) {
 
 function guardSession() {
   const ses = session.defaultSession;
+  // The microphone, for the Assistente's voice: the ANI-9 page may ask for sound, never the camera.
+  const audioOnly = (details: { mediaTypes?: string[] }) =>
+    (details.mediaTypes ?? []).length > 0 && (details.mediaTypes ?? []).every((type) => type === "audio");
   ses.setPermissionRequestHandler((_contents, permission, callback, details) => {
-    callback(ALLOWED_PERMISSIONS.has(permission) && isAppUrl(details.requestingUrl, appOrigin));
+    const allowed =
+      ALLOWED_PERMISSIONS.has(permission) ||
+      (permission === "media" && audioOnly(details as { mediaTypes?: string[] }));
+    callback(allowed && isAppUrl(details.requestingUrl, appOrigin));
   });
-  ses.setPermissionCheckHandler((_contents, permission, requestingOrigin) => {
-    return ALLOWED_PERMISSIONS.has(permission) && isAppUrl(requestingOrigin, appOrigin);
+  ses.setPermissionCheckHandler((_contents, permission, requestingOrigin, details) => {
+    const allowed =
+      ALLOWED_PERMISSIONS.has(permission) ||
+      (permission === "media" && (details as { mediaType?: string }).mediaType === "audio");
+    return allowed && isAppUrl(requestingOrigin, appOrigin);
   });
   // The login is a cookie that lasts weeks: write it to disk as soon as it
   // changes, so quitting (or the app being closed by the system) right after
@@ -372,6 +386,32 @@ function listen() {
     const to = channelOf(channel);
     if (fromApp(event) && to.ok) assistant.stop(to.channel);
   });
+
+  // The Assistente's voice (voice.ts): the page sends what the microphone hears and plays what comes back.
+  ipcMain.handle(CHANNELS.voiceStatus, (event) =>
+    fromApp(event) ? voice.status() : { state: "error", detail: "origem" },
+  );
+  ipcMain.handle(CHANNELS.voiceInstall, (event) => (fromApp(event) ? voice.install() : { ok: false, error: "origem" }));
+  ipcMain.handle(CHANNELS.voiceListen, async (event) => {
+    if (!fromApp(event)) return { ok: false, error: "origem" };
+    // macOS asks the person once; after a no, only System Settings gives it back.
+    if (process.platform === "darwin" && systemPreferences.getMediaAccessStatus("microphone") !== "granted") {
+      const granted = await systemPreferences.askForMediaAccess("microphone").catch(() => false);
+      if (!granted) return { ok: false, error: "microfone" };
+    }
+    return voice.listen();
+  });
+  ipcMain.on(CHANNELS.voiceAudio, (event, payload: unknown) => {
+    const samples = voiceAudioSchema.safeParse(payload);
+    if (fromApp(event) && samples.success) voice.audio(samples.data);
+  });
+  ipcMain.on(CHANNELS.voiceStop, (event) => fromApp(event) && voice.stop());
+  ipcMain.on(CHANNELS.voiceCancel, (event) => fromApp(event) && voice.cancel());
+  ipcMain.on(CHANNELS.voiceSay, (event, id: unknown, text: unknown) => {
+    const said = voiceSaySchema.safeParse([id, text]);
+    if (fromApp(event) && said.success) voice.say(said.data[0], said.data[1]);
+  });
+  ipcMain.on(CHANNELS.voiceHush, (event) => fromApp(event) && voice.hush());
 }
 
 function start() {
@@ -410,6 +450,18 @@ function start() {
         contents.send(CHANNELS.assistantEvent, event);
     },
   });
+  voice = createVoiceHost({
+    binary: app.isPackaged
+      ? join(process.resourcesPath, "ani9-voz")
+      : join(app.getAppPath(), "native", "voz", "target", "release", "ani9-voz"),
+    // The models are the same for every profile of the app (installed, development): kept once.
+    modelsDir: join(app.getPath("appData"), APP_NAME, "modelos-de-voz"),
+    emit: (event) => {
+      const contents = win?.webContents;
+      if (contents && !contents.isDestroyed() && isAppUrl(contents.getURL(), appOrigin))
+        contents.send(CHANNELS.voiceEvent, event);
+    },
+  });
   guardSession();
   listen();
   refreshMenu();
@@ -422,6 +474,7 @@ function start() {
 app.on("before-quit", () => {
   quitting = true;
   void session.defaultSession.cookies.flushStore();
+  voice?.dispose();
   assistant?.dispose();
 });
 app.on("activate", () => showWindow());

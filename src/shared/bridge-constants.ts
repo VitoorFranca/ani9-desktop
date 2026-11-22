@@ -17,6 +17,15 @@ export const CHANNELS = {
   assistantInterrupt: "ani9:assistant-interrupt",
   assistantStop: "ani9:assistant-stop",
   assistantEvent: "ani9:assistant-event",
+  voiceStatus: "ani9:voice-status",
+  voiceInstall: "ani9:voice-install",
+  voiceListen: "ani9:voice-listen",
+  voiceAudio: "ani9:voice-audio",
+  voiceStop: "ani9:voice-stop",
+  voiceCancel: "ani9:voice-cancel",
+  voiceSay: "ani9:voice-say",
+  voiceHush: "ani9:voice-hush",
+  voiceEvent: "ani9:voice-event",
 } as const;
 
 /** Models the page may ask for, as Claude Code names them ("default" = the plan's own default). */
@@ -86,6 +95,52 @@ export interface Ani9Assistant {
   onEvent(listener: (event: AssistantEvent) => void): () => void;
 }
 
+/** Whether the voice can be used: its local models are on this Mac, being downloaded, or missing. */
+export interface VoiceStatus {
+  state: "ready" | "missing" | "installing" | "unavailable" | "error";
+  /** While installing, 0 to 1. */
+  progress?: number;
+  /** Size of the download, in bytes, when missing. */
+  size?: number;
+  detail?: string;
+}
+
+/** Sample rate of the audio the page sends while the person speaks (mono, float). */
+export const VOICE_INPUT_RATE = 16_000;
+
+export type VoiceEvent =
+  | { type: "status"; status: VoiceStatus }
+  /** The person started speaking. */
+  | { type: "speech" }
+  /** What the person said, once they went quiet. */
+  | { type: "heard"; text: string }
+  /** The microphone heard no speech. */
+  | { type: "nothing" }
+  /** A piece of the answer, spoken: mono float samples. */
+  | { type: "audio"; id: number; rate: number; samples: Float32Array }
+  /** Everything of `say(id)` was sent. */
+  | { type: "said"; id: number }
+  | { type: "error"; message: string };
+
+/**
+ * The Assistente's voice, made on this Mac with local models (never Apple's
+ * speech): it understands what the person says and speaks the answers. The
+ * page captures the microphone and plays the voice; the app does the rest.
+ */
+export interface Ani9Voice {
+  status(): Promise<VoiceStatus>;
+  /** Downloads the models once (progress comes as "status" events). */
+  install(): Promise<{ ok: boolean; error?: string }>;
+  /** A new utterance starts: send its audio with `audio`, then `stop` (or the app notices the silence itself). */
+  listen(): Promise<{ ok: boolean; error?: string }>;
+  audio(samples: Float32Array): void;
+  stop(): void;
+  cancel(): void;
+  say(id: number, text: string): void;
+  hush(): void;
+  onEvent(listener: (event: VoiceEvent) => void): () => void;
+}
+
 export interface Notice {
   /** Showing a notice with the same tag replaces the previous one. */
   tag: string;
@@ -111,6 +166,8 @@ export interface Ani9Desktop {
   onTaskDone(listener: (taskId: string) => void): () => void;
   /** The Assistente's engine. Absent in app versions before 0.2.0. */
   assistant?: Ani9Assistant;
+  /** The Assistente's voice. Absent in app versions before 0.4.0. */
+  voice?: Ani9Voice;
 }
 
 /** Text for the Dock: empty clears it, very large counts are shortened. */
