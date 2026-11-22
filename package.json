@@ -1,6 +1,6 @@
 {
   "name": "ani9-desktop",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "App desktop do ANI-9 para macOS: a web do ANI-9 numa janela própria, com notificações, Dock e menus nativos.",
   "license": "MIT",

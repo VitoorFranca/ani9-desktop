@@ -33,6 +33,11 @@ export interface AssistantStatus {
   detail?: string;
 }
 
+/** The conversation a page talks to when it names none (and the only one before 0.3.0). */
+export const DEFAULT_CHANNEL = "principal";
+/** Conversations kept alive at once (the orb's and the chat's, and one to spare). */
+export const MAX_CHANNELS = 3;
+
 /** What the page sends to open a conversation; the app decides everything else about the engine. */
 export interface AssistantStart {
   /** The tutor's text, from the ANI-9 server. */
@@ -40,30 +45,44 @@ export interface AssistantStart {
   /** Opens the ANI-9 tools for this conversation only. */
   token: string;
   model: (typeof ASSISTANT_MODELS)[number];
+  /**
+   * Which of the page's conversations this is ("assistente", "chat"…). Each
+   * has its own engine; starting one leaves the others running.
+   */
+  channel?: string | undefined;
 }
 
-export type AssistantEvent =
+type AssistantEventBody =
   /** The engine is up: the tools it has, and whether it runs on the person's plan (not an API key). */
   | { type: "ready"; tools: string[]; subscription: boolean; model: string }
   | { type: "delta"; text: string }
   /** A whole message of the assistant (the deltas, joined). */
   | { type: "message"; text: string }
-  | { type: "tool"; name: string }
+  /** It called a tool (`id` pairs it with the `toolDone` that follows). */
+  | { type: "tool"; name: string; id?: string }
+  /** A tool it called answered. */
+  | { type: "toolDone"; id?: string; ok: boolean }
   /** The turn ended. */
   | { type: "done"; ok: boolean; error?: string }
   /** How much of the plan's limits is used (0 to 1), when Claude Code tells. */
   | { type: "usage"; status: string; fiveHour?: number; sevenDay?: number; resetsAt?: number }
-  /** The engine stopped (asked to, or by itself). */
-  | { type: "closed"; reason: "stopped" | "exited" | "unsafe" | "failed"; detail?: string };
+  /** The engine stopped (asked to, by itself, or after a long silence). */
+  | { type: "closed"; reason: "stopped" | "exited" | "unsafe" | "failed" | "idle"; detail?: string };
+
+/** `channel`: the conversation the event belongs to (absent before 0.3.0). */
+export type AssistantEvent = AssistantEventBody & { channel?: string };
 
 export interface Ani9Assistant {
+  /** Present from 0.3.0: several conversations run at once, each on its channel. */
+  channels?: true;
   status(): Promise<AssistantStatus>;
-  /** Starts the engine for one conversation, replacing any other. */
+  /** Starts the engine for one conversation. It replaces only the engine of the same channel. */
   start(config: AssistantStart): Promise<{ ok: boolean; error?: string }>;
-  send(text: string): void;
+  send(text: string, channel?: string): void;
   /** Stops the answer being written. The engine may close; start again to go on. */
-  interrupt(): void;
-  stop(): void;
+  interrupt(channel?: string): void;
+  /** Stops one conversation's engine, or all of them when no channel is given. */
+  stop(channel?: string): void;
   onEvent(listener: (event: AssistantEvent) => void): () => void;
 }
 

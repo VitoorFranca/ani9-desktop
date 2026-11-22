@@ -22,11 +22,15 @@ export const noticeSchema = z.object({
 
 export const badgeSchema = z.number().int().min(0).max(1_000_000);
 
+/** A name the page gives one of its conversations; it only ever picks an engine among the app's own. */
+export const assistantChannelSchema = z.string().regex(/^[a-z0-9-]{1,40}$/, "canal do assistente");
+
 export const assistantStartSchema = z.strictObject({
   systemPrompt: z.string().min(1).max(60_000),
   // Only a conversation token of the ANI-9 server; it ends up in a header, so no spaces or quotes.
   token: z.string().regex(/^ani9a_[A-Za-z0-9_.-]{20,600}$/, "token do assistente"),
   model: z.enum(ASSISTANT_MODELS),
+  channel: assistantChannelSchema.optional(),
 });
 
 export const assistantTextSchema = z.string().min(1).max(20_000);

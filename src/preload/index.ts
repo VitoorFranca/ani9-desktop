@@ -29,12 +29,13 @@ function subscribe(channel: string, listener: (value: string) => void): () => vo
 }
 
 const assistant: Ani9Assistant = {
+  channels: true,
   status: () => ipcRenderer.invoke(CHANNELS.assistantStatus) as Promise<AssistantStatus>,
   start: (config: AssistantStart) =>
     ipcRenderer.invoke(CHANNELS.assistantStart, config) as Promise<{ ok: boolean; error?: string }>,
-  send: (text: string) => ipcRenderer.send(CHANNELS.assistantSend, text),
-  interrupt: () => ipcRenderer.send(CHANNELS.assistantInterrupt),
-  stop: () => ipcRenderer.send(CHANNELS.assistantStop),
+  send: (text: string, channel?: string) => ipcRenderer.send(CHANNELS.assistantSend, text, channel),
+  interrupt: (channel?: string) => ipcRenderer.send(CHANNELS.assistantInterrupt, channel),
+  stop: (channel?: string) => ipcRenderer.send(CHANNELS.assistantStop, channel),
   onEvent: (listener) => {
     const handler = (_event: IpcRendererEvent, value: unknown) => {
       if (value && typeof value === "object") listener(value as AssistantEvent);

@@ -139,9 +139,23 @@ export function readEngineLine(line: string): AssistantEvent[] {
         events.push({
           type: "tool",
           name: block.name.startsWith(TOOL_PREFIX) ? block.name.slice(TOOL_PREFIX.length) : block.name,
+          ...(typeof block.id === "string" ? { id: block.id } : {}),
         });
     }
     return events;
+  }
+  // A tool's answer goes back to the model as a message "of the user": the page only learns that it came.
+  if (message.type === "user") {
+    const content = obj(message.message)?.content;
+    if (!Array.isArray(content)) return [];
+    return content
+      .map(obj)
+      .filter((block) => block?.type === "tool_result")
+      .map((block) => ({
+        type: "toolDone" as const,
+        ok: block!.is_error !== true,
+        ...(typeof block!.tool_use_id === "string" ? { id: block!.tool_use_id } : {}),
+      }));
   }
   if (message.type === "result") {
     const ok = message.subtype === "success" && message.is_error !== true;

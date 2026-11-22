@@ -12,6 +12,7 @@ import {
   ipcMain,
   nativeTheme,
   net,
+  powerSaveBlocker,
   screen,
   session,
   shell,
@@ -23,6 +24,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
   CHANNELS,
+  assistantChannelSchema,
   assistantStartSchema,
   assistantTextSchema,
   badgeSchema,
@@ -342,13 +344,26 @@ function listen() {
     const config = assistantStartSchema.safeParse(payload);
     return config.success ? assistant.start(config.data) : { ok: false, error: "pedido inválido" };
   });
-  ipcMain.on(CHANNELS.assistantSend, (event, payload: unknown) => {
+  // A channel only ever names one of the app's own engines; one that is not a valid name is ignored.
+  const channelOf = (value: unknown): { ok: true; channel: string | undefined } | { ok: false } => {
+    if (value === undefined || value === null) return { ok: true, channel: undefined };
+    const parsed = assistantChannelSchema.safeParse(value);
+    return parsed.success ? { ok: true, channel: parsed.data } : { ok: false };
+  };
+  ipcMain.on(CHANNELS.assistantSend, (event, payload: unknown, channel: unknown) => {
     if (!fromApp(event)) return;
     const text = assistantTextSchema.safeParse(payload);
-    if (text.success) assistant.send(text.data);
+    const to = channelOf(channel);
+    if (text.success && to.ok) assistant.send(text.data, to.channel);
   });
-  ipcMain.on(CHANNELS.assistantInterrupt, (event) => fromApp(event) && assistant.interrupt());
-  ipcMain.on(CHANNELS.assistantStop, (event) => fromApp(event) && assistant.stop());
+  ipcMain.on(CHANNELS.assistantInterrupt, (event, channel: unknown) => {
+    const to = channelOf(channel);
+    if (fromApp(event) && to.ok) assistant.interrupt(to.channel);
+  });
+  ipcMain.on(CHANNELS.assistantStop, (event, channel: unknown) => {
+    const to = channelOf(channel);
+    if (fromApp(event) && to.ok) assistant.stop(to.channel);
+  });
 }
 
 function start() {
@@ -368,9 +383,18 @@ function start() {
     onOpen: openNotice,
     onDone: finishTask,
   });
+  // An answer may take minutes (a whole module of a roadmap): the Mac does not sleep in the middle of one.
+  let awake: number | null = null;
   assistant = createAssistantHost({
     appOrigin,
     dataDir: join(app.getPath("userData"), "assistente"),
+    onAnswering: (count) => {
+      if (count > 0 && awake === null) awake = powerSaveBlocker.start("prevent-app-suspension");
+      else if (count === 0 && awake !== null) {
+        powerSaveBlocker.stop(awake);
+        awake = null;
+      }
+    },
     emit: (event) => {
       const contents = win?.webContents;
       // Only the ANI-9 page hears the conversation.

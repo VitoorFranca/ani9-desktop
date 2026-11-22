@@ -9,7 +9,7 @@ import {
   toolsConfig,
   userLine,
 } from "../src/main/assistantProfile.js";
-import { assistantStartSchema, assistantTextSchema } from "../src/shared/bridge.js";
+import { assistantChannelSchema, assistantStartSchema, assistantTextSchema } from "../src/shared/bridge.js";
 
 const TOKEN = `ani9a_${"a".repeat(40)}.${"b".repeat(43)}`;
 const start = { systemPrompt: "Você é o tutor.", token: TOKEN, model: "default" as const };
@@ -125,6 +125,45 @@ describe("engine output", () => {
     expect(readEngineLine(JSON.stringify({ type: "user" }))).toEqual([]);
   });
 
+  it("tells the page when a tool is called and when it answers, never what it carried", () => {
+    expect(
+      readEngineLine(
+        JSON.stringify({
+          type: "assistant",
+          message: {
+            content: [
+              {
+                type: "tool_use",
+                id: "t1",
+                name: "mcp__ani9__plataforma_agir",
+                input: { metodo: "POST", caminho: "/api/decks" },
+              },
+            ],
+          },
+        }),
+      ),
+    ).toEqual([{ type: "tool", name: "plataforma_agir", id: "t1" }]);
+    expect(
+      readEngineLine(
+        JSON.stringify({
+          type: "user",
+          message: {
+            role: "user",
+            content: [
+              { type: "tool_result", tool_use_id: "t1", content: [{ type: "text", text: '{"id":"segredo"}' }] },
+              { type: "tool_result", tool_use_id: "t2", is_error: true, content: "recusado" },
+            ],
+          },
+        }),
+      ),
+    ).toEqual([
+      { type: "toolDone", ok: true, id: "t1" },
+      { type: "toolDone", ok: false, id: "t2" },
+    ]);
+    // What the person typed comes back as plain text: nothing to tell.
+    expect(readEngineLine(JSON.stringify({ type: "user", message: { role: "user", content: "oi" } }))).toEqual([]);
+  });
+
   it("writes one message per line for the engine", () => {
     const line = userLine('diga "oi"\nagora');
     expect(line.endsWith("\n")).toBe(true);
@@ -156,5 +195,13 @@ describe("what the page may send", () => {
     expect(assistantStartSchema.safeParse({ ...start, mcpUrl: "https://evil.com" }).success).toBe(false);
     expect(assistantTextSchema.safeParse("").success).toBe(false);
     expect(assistantTextSchema.safeParse("x".repeat(20_001)).success).toBe(false);
+  });
+
+  it("takes a channel only as a plain name of one of the page's conversations", () => {
+    expect(assistantStartSchema.safeParse({ ...start, channel: "chat" }).success).toBe(true);
+    expect(assistantChannelSchema.safeParse("assistente").success).toBe(true);
+    for (const odd of ["", "../x", "a b", "A", "x".repeat(41), 3, {}]) {
+      expect(assistantChannelSchema.safeParse(odd).success, String(odd)).toBe(false);
+    }
   });
 });

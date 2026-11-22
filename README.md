@@ -15,9 +15,11 @@ navegador não faz:
 - **Links para fora** (fontes dos roadmaps, links nos cartões) abrem no
   navegador padrão.
 - **Aviso de versão nova** uma vez por dia (o app não se atualiza sozinho).
-- **Assistente** (nas contas em que ele está ligado): o tutor do ANI-9 usa o
-  [Claude Code](https://claude.com/claude-code) instalado no seu Mac, com o
-  seu login. Sem o Claude Code, o resto do app funciona igual.
+- **Assistente** (nas contas em que ele está ligado): o assistente e tutor do
+  ANI-9 usa o [Claude Code](https://claude.com/claude-code) instalado no seu
+  Mac, com o seu login. Ele pode ter mais de uma conversa ao mesmo tempo (a
+  do assistente, chamado de qualquer tela, e a do Chat). Sem o Claude Code, o
+  resto do app funciona igual.
 
 Os seus dados continuam onde sempre estiveram, na nuvem do ANI-9: o mesmo
 login, os mesmos baralhos no site e no celular. O app precisa de internet.
@@ -94,9 +96,14 @@ A janela abre o site do ANI-9. A página fala com o app só pela ponte
 | `onTaskDone(fn)`                               | "Feita" num aviso                                       |
 
 | `assistant.status()` | o Claude Code deste Mac: pronto, ausente ou sem login |
-| `assistant.start({ systemPrompt, token, model })` | abre uma conversa (uma por vez) |
-| `assistant.send(texto)`, `interrupt()`, `stop()` | fala, para a resposta, encerra |
-| `assistant.onEvent(fn)` | texto aos poucos, ferramenta em uso, fim do turno, uso |
+| `assistant.channels` | `true` a partir da 0.3.0: várias conversas ao mesmo tempo, cada uma num canal |
+| `assistant.start({ systemPrompt, token, model, channel? })` | abre a conversa do canal (até três; a mais parada cede a vez) |
+| `assistant.send(texto, canal?)`, `interrupt(canal?)`, `stop(canal?)` | fala, para a resposta, encerra (sem canal, `stop` encerra todas) |
+| `assistant.onEvent(fn)` | texto aos poucos, ferramenta chamada e respondida, fim do turno, uso; cada evento diz o canal |
+
+Um motor sem uso por vinte minutos é encerrado; a página o inicia de novo
+quando a conversa continua. Enquanto uma resposta está em andamento, o app
+impede que o Mac entre em repouso (uma resposta longa falharia no meio).
 
 O contrato muda só com versão nova de `bridge`, e o site confere cada função
 antes de usar. Assim, um site novo continua funcionando com um app antigo.
@@ -115,9 +122,11 @@ antes de usar. Assim, um site novo continua funcionando com um app antigo.
   perfil fixo: nenhuma ferramenta do Claude Code (sem terminal, arquivos ou
   web), só as ferramentas do ANI-9 no endereço do próprio site, sem as suas
   configurações, skills, memória ou conectores, e sem guardar a conversa em
-  disco. A página só escolhe o texto do tutor, o token da conversa e o
-  modelo. O app nunca vê a credencial do Claude, e encerra a conversa se o
-  motor abrir com qualquer ferramenta que não seja do ANI-9.
+  disco. A página só escolhe o texto do tutor, o token da conversa, o modelo e
+  o nome do canal (que só escolhe entre os motores do próprio app). Da chamada
+  de uma ferramenta, a página fica sabendo o nome e se respondeu, nunca o que
+  ela levou ou trouxe. O app nunca vê a credencial do Claude, e encerra a
+  conversa se o motor abrir com qualquer ferramenta que não seja do ANI-9.
 - Fuses do Electron: o binário não roda como Node, ignora `NODE_OPTIONS` e
   `--inspect` e só carrega o app de dentro do `app.asar`.
 
