@@ -25,6 +25,19 @@ export function resolveAppUrl(override: string | undefined): URL {
   return new URL(url.origin + "/");
 }
 
+/**
+ * The folder the app keeps its data in (login, window, the assistant's
+ * files), under the system's application data. The installed app uses its
+ * own name; a development run (ANI9_DESKTOP_URL set) gets "ANI-9 Dev", or
+ * "ANI-9 Dev <profile>" with ANI9_DESKTOP_PROFILE, so tests and development
+ * never sign the installed app out or replace the person's login.
+ */
+export function profileFolder(appName: string, override: string | undefined, profile: string | undefined): string {
+  if (!override) return appName;
+  const name = (profile ?? "").replace(/[^A-Za-z0-9-]/g, "").slice(0, 32);
+  return name ? `${appName} Dev ${name}` : `${appName} Dev`;
+}
+
 /** Whether `url` belongs to the app (same origin as `appOrigin`). */
 export function isAppUrl(url: string, appOrigin: string): boolean {
   try {

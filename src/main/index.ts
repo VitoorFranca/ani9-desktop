@@ -33,7 +33,7 @@ import {
 } from "../shared/bridge.js";
 import { createAssistantHost, type AssistantHost } from "./assistant.js";
 import { buildMenu } from "./menu.js";
-import { appPathUrl, externalAction, isAppUrl, resolveAppUrl } from "./navigation.js";
+import { appPathUrl, externalAction, isAppUrl, profileFolder, resolveAppUrl } from "./navigation.js";
 import { createNotifier, type AppNotice } from "./notices.js";
 import { RELEASES_URL, REPOSITORY, checkForUpdate, type Release } from "./updates.js";
 import { MIN_SIZE, sanitizeState } from "./windowState.js";
@@ -61,6 +61,8 @@ let update: Release | null = null;
 let listening = new Set<string>();
 
 app.setName(APP_NAME);
+const folder = profileFolder(APP_NAME, process.env.ANI9_DESKTOP_URL, process.env.ANI9_DESKTOP_PROFILE);
+if (folder !== APP_NAME) app.setPath("userData", join(app.getPath("appData"), folder));
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -314,6 +316,12 @@ function guardSession() {
   ses.setPermissionCheckHandler((_contents, permission, requestingOrigin) => {
     return ALLOWED_PERMISSIONS.has(permission) && isAppUrl(requestingOrigin, appOrigin);
   });
+  // The login is a cookie that lasts weeks: write it to disk as soon as it
+  // changes, so quitting (or the app being closed by the system) right after
+  // signing in does not lose it.
+  ses.cookies.on("changed", (_event, cookie) => {
+    if (cookie.name === "session") void ses.cookies.flushStore();
+  });
   ses.on("will-download", (_event, item) => {
     item.setSaveDialogOptions({ title: "Salvar", defaultPath: join(app.getPath("downloads"), item.getFilename()) });
   });
@@ -413,6 +421,7 @@ function start() {
 
 app.on("before-quit", () => {
   quitting = true;
+  void session.defaultSession.cookies.flushStore();
   assistant?.dispose();
 });
 app.on("activate", () => showWindow());

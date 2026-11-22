@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_APP_URL, appPathUrl, externalAction, isAppUrl, resolveAppUrl } from "../src/main/navigation.js";
+import {
+  DEFAULT_APP_URL,
+  appPathUrl,
+  externalAction,
+  isAppUrl,
+  profileFolder,
+  resolveAppUrl,
+} from "../src/main/navigation.js";
 
 const ORIGIN = "https://www.ani9.online";
 
@@ -62,5 +69,15 @@ describe("appPathUrl", () => {
     expect(appPathUrl("/\\evil.com", ORIGIN)).toBeNull();
     expect(appPathUrl("https://evil.com", ORIGIN)).toBeNull();
     expect(appPathUrl("rotina", ORIGIN)).toBeNull();
+  });
+});
+
+describe("profileFolder", () => {
+  it("keeps the installed app in its own folder, and development apart from it", () => {
+    expect(profileFolder("ANI-9", undefined, undefined)).toBe("ANI-9");
+    expect(profileFolder("ANI-9", undefined, "teste")).toBe("ANI-9");
+    expect(profileFolder("ANI-9", "http://127.0.0.1:4320", undefined)).toBe("ANI-9 Dev");
+    expect(profileFolder("ANI-9", "http://127.0.0.1:4320", "teste")).toBe("ANI-9 Dev teste");
+    expect(profileFolder("ANI-9", "http://127.0.0.1:4320", "../../x y")).toBe("ANI-9 Dev xy");
   });
 });
