@@ -58,6 +58,18 @@ jobs:
           pnpm check
           pnpm test
 
+      # The voice engine goes inside the app (package.mjs › extraResource).
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/voz
+      - name: Motor de voz
+        working-directory: native/voz
+        run: |
+          cargo test --release --locked
+          cargo build --release --locked
+          ls -lh target/release/ani9-voz
+
       - name: Certificado Developer ID
         if: env.HAS_CERT == 'true'
         env:
